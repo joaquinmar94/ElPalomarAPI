@@ -1,5 +1,6 @@
 using LibUsbDotNet.LibUsb;
 using Microsoft.AspNetCore.Mvc;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
 
@@ -28,9 +29,18 @@ namespace ElPalomar.Controllers
 					{
 						byte[] data = Encoding.ASCII.GetBytes("#I#");
 						strem.Write(data, 0, data.Length);
+						byte[] buffer = new byte[1024];
+						int bytesRead = strem.Read(buffer, 0, buffer.Length);
+
+						if (bytesRead > 0)
+						{
+							string dataReceived = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+							return "Datos recibidos: " + dataReceived;
+						}
 
 						StreamReader reader = new StreamReader(strem);
 						string response = reader.ReadToEnd();
+						strem.Close();
 						client.Close();
 						return response;
 					}
