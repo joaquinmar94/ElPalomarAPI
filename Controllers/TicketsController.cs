@@ -20,18 +20,25 @@ namespace ElPalomar.Controllers
 		[HttpGet("cashlogy-connect")]
 		public async Task<ActionResult<string>> CheckConnectionCashLogy()
 		{
-			using (TcpClient client = new TcpClient("192.168.10.9", 8092))
+			try
 			{
-				using (NetworkStream strem = client.GetStream())
+				using (TcpClient client = new TcpClient("192.168.10.9", 8092))
 				{
-					byte[] data = Encoding.ASCII.GetBytes("#I#");
-					strem.Write(data, 0, data.Length);
+					using (NetworkStream strem = client.GetStream())
+					{
+						byte[] data = Encoding.ASCII.GetBytes("#I#");
+						strem.Write(data, 0, data.Length);
 
-					StreamReader reader = new StreamReader(strem);
-					string response = reader.ReadToEnd();
-					client.Close();
-					return response;
+						StreamReader reader = new StreamReader(strem);
+						string response = reader.ReadToEnd();
+						client.Close();
+						return response;
+					}
 				}
+			}
+			catch (Exception ex)
+			{
+				return ex.Message;
 			}
 		}
 	}
