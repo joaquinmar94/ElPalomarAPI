@@ -15,13 +15,10 @@ namespace ElPalomar.Controllers
 			_logger = logger;
 		}
 
-		[HttpGet("usb-devices")]
-		public async Task<ActionResult<Object>> GetDevices()
+		[HttpGet("cashlogy-connect")]
+		public async Task<ActionResult<Object>> CheckConnectionCashLogy()
 		{
-			var allDevices = LibUsbDotNet.LibUsb.LibUsbDevice.AllDevices;
-			var allWinUsbDevices = LibUsbDevice.AllWinUsbDevices;
-
-			return new { allDevices, allWinUsbDevices };
+			
 		}
 	}
 }
