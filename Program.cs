@@ -1,3 +1,5 @@
+using AgoraService;
+using AgoraService.Interface;
 using ElPalomar.Context;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddDbContext<ElPalomarDbContext>();
+builder.Services.AddScoped<IAgoraService, AgoraService.AgoraService>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

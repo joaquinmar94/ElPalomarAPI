@@ -1,13 +1,15 @@
-using LibUsbDotNet.LibUsb;
+using AgoraService;
+using AgoraService.Interface;
+using AgoraService.Models;
+using ElPalomar.Context;
+using ElPalomar.Enum;
+using ElPalomar.Models;
 using Microsoft.AspNetCore.Mvc;
-using System.IO;
+using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Net;
-using ElPalomar.Context;
-using ElPalomar.Models;
-using System.Text.Json.Serialization;
-using Newtonsoft.Json;
 
 namespace ElPalomar.Controllers
 {
@@ -18,12 +20,15 @@ namespace ElPalomar.Controllers
 
 		private readonly ILogger<TicketsController> _logger;
 		private readonly ElPalomarDbContext _context;
+		private readonly IAgoraService _agoraService;
 
 		public TicketsController(ILogger<TicketsController> logger,
-			ElPalomarDbContext context)
+			ElPalomarDbContext context,
+			IAgoraService agoraService)
 		{
 			_logger = logger;
 			_context = context;
+			_agoraService = agoraService;
 		}
 
 		[HttpGet("cashlogy-connect")]
@@ -60,25 +65,65 @@ namespace ElPalomar.Controllers
 			}
 		}
 
-		[HttpPost("{ticketId}/payment")]
-		public async Task<ActionResult<string>> TicketPayment(int ticketId)
+		[HttpGet("{ticketId}/pos/{posId}/user/{userId}/payment")]
+		public async Task<ActionResult<HttpStatusCode>> TicketPayment(int ticketId, int posId, int userId)
 		{
-
-			//Busco el ticket en base de datos.
-			var data = _context.Tickets.Where(x => x.Id == ticketId).FirstOrDefault();
-
-			if (data != null)
+			try
 			{
-				//Busco el importe del ticket.
-				//decimal ticketAmount = data.Net;
-				//Envio instrucción a cashlogi para que cobre el importe del ticket.
-				//string instructionPayment = $"#C#00001#1#{ticketAmount}#0#0#0#0#0#1#0#0#";
-				//string responseCashLogi = SendCashlogiInstruction(instructionPayment);
+				//Busco el ticket en base de datos.
+				var data = _context.Tickets.Include(t => t.TicketLines).FirstOrDefault(t => t.Id == ticketId);
 
-				return JsonConvert.SerializeObject(data, Formatting.Indented);
+				if (data != null)
+				{
+					//Busco el importe del ticket.
+					decimal ticketAmount = Math.Round(data.Net, 2);
+					int amountIntValue = (int)(ticketAmount * 100);
+
+					//Envio instrucción a cashlogi para que cobre el importe del ticket.
+					string instructionPayment = $"#C#00001#1#{amountIntValue}#0#0#0#0#0#1#0#0#";
+					//string responseCashLogi = SendCashlogiInstruction(instructionPayment);
+
+					//Elimino la linea mas cara del ticket
+					if (data.TicketLines.Count > 1)
+					{
+						//Ordeno las linea del ticket de mayor a menor en base al totalAmount
+						IEnumerable<TicketLine> ticketLines = data.TicketLines.OrderByDescending(tl => tl.TotalAmount);
+
+						//Como la lsita está ordenada, se tomará la primer linea ya que es la que tiene el mayor monto
+						TicketLine ticketLine = ticketLines.First();
+
+						//Elimino la linea del TicketLine en Base de Datos
+						_context.TicketLines.Remove(ticketLine);
+
+						//Guardo los cambios
+						await _context.SaveChangesAsync();
+
+						//Armo el objeto que se envia a la API de Ágora para procesar el pago del ticket
+						AgoraTicketPayment ticketPaymentBody = new AgoraTicketPayment() 
+						{
+							TicketGlobalId = data.GlobalId,
+							PosId = posId,
+							UserId = userId,
+							Date = DateTime.Now,
+							PaymentMethodId = (int)PaymentMethodEnum.Cash,
+							Amount = data.Net,
+							PaidAmount = data.Net, //Aca deberia ir el monto que el cliente introdujo en el CashLogi (Ver respuesta del cashlogi)
+							ChangeAmount = 0, //Cambio que dió el CashLogi (Ver respuesta o calcular cambio con data.Net y el monto introducido por el cliente)
+						};
+
+						var lala = _agoraService.PostPayment(JsonConvert.SerializeObject(ticketPaymentBody));
+					}
+
+					return HttpStatusCode.OK;
+				}
+
+				return HttpStatusCode.BadRequest;
 			}
-
-			return "error";
+			catch (Exception)
+			{
+				return HttpStatusCode.InternalServerError;
+			}
+			
 		}
 	}
 }
