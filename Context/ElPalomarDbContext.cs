@@ -18,17 +18,23 @@ namespace ElPalomar.Context
 
 		public DbSet<Ticket> Tickets { get; set; }
 		public DbSet<TicketLine> TicketLines { get; set; }
+        public DbSet<TicketLineAddin> TicketLineAddins { get; set; }
 
-		protected override void OnModelCreating(ModelBuilder modelBuilder)
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
 		{
+			modelBuilder.Entity<TicketLineAddin>().ToTable("TicketLineAddin")
+				.HasKey(x => new { x.TicketLineId, x.AddinIndex });
 			modelBuilder.Entity<TicketLine>().ToTable("TicketLine")
-				.HasKey(e => e.Id);
+				.HasMany(x => x.TicketLineAddins)
+				.WithOne(x => x.TicketLine)
+				.HasForeignKey(x => x.TicketLineId)
+				.HasPrincipalKey(e => e.Id)
+				.OnDelete(DeleteBehavior.Cascade);
 			modelBuilder.Entity<Ticket>().ToTable("Ticket")
 				.HasMany(e => e.TicketLines)
 				.WithOne(e => e.Ticket)
 				.HasForeignKey(e => e.TicketId)
 				.HasPrincipalKey(t => t.Id);
-
 		}
 	}
 }

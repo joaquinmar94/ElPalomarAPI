@@ -1,4 +1,3 @@
-using AgoraService;
 using AgoraService.Interface;
 using AgoraService.Models;
 using ElPalomar.Context;
@@ -20,15 +19,18 @@ namespace ElPalomar.Controllers
 
 		private readonly ILogger<TicketsController> _logger;
 		private readonly ElPalomarDbContext _context;
-		private readonly IAgoraService _agoraService;
+		private readonly IAgoraAPIService _agoraService;
+		private readonly IAgoraBusService _agoraBusService;
 
 		public TicketsController(ILogger<TicketsController> logger,
 			ElPalomarDbContext context,
-			IAgoraService agoraService)
+			IAgoraAPIService agoraService,
+			IAgoraBusService agoraBusService)
 		{
 			_logger = logger;
 			_context = context;
 			_agoraService = agoraService;
+			_agoraBusService = agoraBusService;
 		}
 
 		[HttpGet("cashlogy-connect")]
@@ -66,12 +68,12 @@ namespace ElPalomar.Controllers
 		}
 
 		[HttpGet("{ticketId}/pos/{posId}/user/{userId}/payment")]
-		public async Task<ActionResult<HttpStatusCode>> TicketPayment(int ticketId, int posId, int userId)
+		public async Task<ActionResult<ResultModel>> TicketPayment(int ticketId, int posId, int userId)
 		{
 			try
 			{
 				//Busco el ticket en base de datos.
-				var data = _context.Tickets.Include(t => t.TicketLines).FirstOrDefault(t => t.Id == ticketId);
+				var data = _context.Tickets.Include(t => t.TicketLines).ThenInclude(tl => tl.TicketLineAddins).FirstOrDefault(t => t.Id == ticketId);
 
 				if (data != null)
 				{
@@ -84,44 +86,59 @@ namespace ElPalomar.Controllers
 					//string responseCashLogi = SendCashlogiInstruction(instructionPayment);
 
 					//Elimino la linea mas cara del ticket
+					TicketLine ticketLineDeleted = null;
 					if (data.TicketLines.Count > 1)
 					{
 						//Ordeno las linea del ticket de mayor a menor en base al totalAmount
 						IEnumerable<TicketLine> ticketLines = data.TicketLines.OrderByDescending(tl => tl.TotalAmount);
-
-						//Como la lsita está ordenada, se tomará la primer linea ya que es la que tiene el mayor monto
-						TicketLine ticketLine = ticketLines.First();
-
+						ticketLineDeleted = ticketLines.First();
 						//Elimino la linea del TicketLine en Base de Datos
-						_context.TicketLines.Remove(ticketLine);
+						data.TicketLines.Remove(ticketLineDeleted);
 
-						//Guardo los cambios
-						await _context.SaveChangesAsync();
-
-						//Armo el objeto que se envia a la API de Ágora para procesar el pago del ticket
-						AgoraTicketPayment ticketPaymentBody = new AgoraTicketPayment() 
+						using (var transaction = _context.Database.BeginTransaction())
 						{
-							TicketGlobalId = data.GlobalId,
-							PosId = posId,
-							UserId = userId,
-							Date = DateTime.Now,
-							PaymentMethodId = (int)PaymentMethodEnum.Cash,
-							Amount = data.Net,
-							PaidAmount = data.Net, //Aca deberia ir el monto que el cliente introdujo en el CashLogi (Ver respuesta del cashlogi)
-							ChangeAmount = 0, //Cambio que dió el CashLogi (Ver respuesta o calcular cambio con data.Net y el monto introducido por el cliente)
-						};
+							data.Net = data.TicketLines.Sum(x => x.TotalAmount);
+							List<TicketLine> ticketLinesList = data.TicketLines.ToList();
 
-						var lala = _agoraService.PostPayment(JsonConvert.SerializeObject(ticketPaymentBody));
+							for(int i = 0; i< ticketLinesList.Count; i++)
+							{
+								ticketLinesList[i].TicketLineIndex = i;
+							}
+
+							data.TicketLines = ticketLinesList;
+							var actualChangeCount = _context.SaveChanges();
+							if (actualChangeCount > 0)
+							{
+								transaction.Commit();
+							}
+						}
+
+						//string deleteTicketLineResponse = await _agoraBusService.DeleteTicketLine(ticketLineDeleted.Id, ticketLineDeleted.TicketId);						
 					}
 
-					return HttpStatusCode.OK;
+					//Armo el objeto que se envia a la API de Ágora para procesar el pago del ticket
+					AgoraTicketPaymentRequestModel ticketPaymentBody = new AgoraTicketPaymentRequestModel()
+					{
+						TicketGlobalId = data.GlobalId,
+						PosId = posId,
+						UserId = userId,
+						Date = DateTime.Now,
+						PaymentMethodId = (int)PaymentMethodEnum.Cash,
+						Amount = data.Net, //Total del ticket (actualmente seria el total del ticket menos el total del ticket eliminado)
+						PaidAmount = data.Net, //Aca deberia ir el monto que el cliente introdujo en el CashLogi (Ver respuesta del cashlogi)
+						ChangeAmount = 0, //Cambio que dió el CashLogi (Ver respuesta o calcular cambio con data.Net y el monto introducido por el cliente)
+					};
+
+					string addPaymentResponse = await _agoraService.PostPayment(JsonConvert.SerializeObject(ticketPaymentBody));
+
+					return new ResultModel { HttpStatusCode = HttpStatusCode.OK, Content = addPaymentResponse};
 				}
 
-				return HttpStatusCode.BadRequest;
+				return new ResultModel { HttpStatusCode = HttpStatusCode.BadRequest, Content = "No se encontró el ticket." };
 			}
-			catch (Exception)
+			catch (Exception ex)
 			{
-				return HttpStatusCode.InternalServerError;
+				return new ResultModel { HttpStatusCode = HttpStatusCode.InternalServerError, Content = ex.Message };
 			}
 			
 		}

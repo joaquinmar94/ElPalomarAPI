@@ -7,5 +7,7 @@
         public int TicketId { get; set; }
 		public Ticket Ticket { get; set; }
         public decimal TotalAmount { get; set; }
+        public int TicketLineIndex { get; set; } 
+        public ICollection<TicketLineAddin> TicketLineAddins { get; set; }
     }
 }
